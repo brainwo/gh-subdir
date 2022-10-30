@@ -1,4 +1,4 @@
-module github.com/brainwo/gh-subfolder
+module github.com/brainwo/gh-subdir
 
 go 1.19
 

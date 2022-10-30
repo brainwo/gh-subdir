@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
-
+	"os"
 	"strings"
 
 	arg "github.com/alexflint/go-arg"
 	"github.com/cli/go-gh"
+	"github.com/cli/go-gh/pkg/api"
 )
 
 type args struct {
@@ -15,14 +17,23 @@ type args struct {
 	Target      string `arg:"-t" help:"where to put the downloaded diretory"`
 	NoRecursive bool   `arg:"--no-recursive" help:"don't download recursively"`
 	Depth       int    `arg:"-d" default:"-1" help:"recursive download depth"`
-	AsZip       bool   `arg:"--as-zip" help:"download subdirectory as a zip file"`
+	// TODO: implement logic to save as zip
+	// AsZip       bool   `arg:"--as-zip" help:"download subdirectory as a zip file"`
 }
 
 func (args) Version() string {
 	return "gh-subdir 0.1.0\nhttps://github.com/brainwo/gh-subdir"
 }
 
+type tempFile struct {
+	OsFile      *os.File
+	Destination string
+}
+
+var tempFiles = []tempFile{}
+
 func main() {
+
 	var args args
 	arg.MustParse(&args)
 
@@ -34,12 +45,30 @@ func main() {
 
 	recursiveDownload(args.Url, depth)
 
-	//TODO: implement logic to bring the download from temporary directory to current directory
+	// This might be a memory-heavy operation
+	// Some alternative methods have been tried with no sucess:
+	// - os.Rename, cross device problem
+	// - io.Copy, file created but no content
+	for _, file := range tempFiles {
+		// TODO: create the directory when there is none
+		data, err := os.ReadFile(file.OsFile.Name())
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = os.WriteFile(file.Destination, data, os.ModePerm)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		file.OsFile.Close()
+	}
+
 	//TODO: implement logic to save directory as zip
 }
 
 // Recursively download a directory, once the depth reaches 0 it will not download the subdirectory.
-// If the depth is set to -1, it will download all the subfolder.
+// If the depth is set to -1, it will download all the subdirectory.
 func recursiveDownload(url string, depth int) {
 	schema := strings.SplitN(url, "/", 8)
 
@@ -76,7 +105,10 @@ func recursiveDownload(url string, depth int) {
 			if depth != 0 {
 				recursiveDownload(content.Html_url, depth-1)
 			}
-		// TODO: add supports for submodules and symlinks
+		case "submodule":
+			// TODO: add supports for submodules
+		case "symlink":
+			// TODO: add supports for symlinks
 		default:
 			return
 		}
@@ -84,14 +116,39 @@ func recursiveDownload(url string, depth int) {
 }
 
 // Save file to temp directory
-// TODO: implement the downloadFile function
 func downloadFile(url string) {
 	schema := strings.SplitN(url, "/", 7)
 
 	repo := schema[4]
 	path := schema[6]
 
-	// TODO: make it use TMP environment variable
-	fmt.Printf("Downloading to: /tmp/gh-subdir/%s/%s\n", repo, path)
-	// TODO: make it work for private repositories as well
+	fmt.Printf("Downloading %s/%s\n", repo, path)
+	file, err := os.CreateTemp(os.TempDir(), "gosubdir")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	opts := api.ClientOptions{}
+
+	client, err := gh.HTTPClient(&opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	size, err := io.Copy(file, resp.Body)
+
+	temp := tempFile{
+		OsFile: file,
+		// TODO: remove parameter (?=) from path
+		Destination: path,
+	}
+
+	fmt.Printf("size: %v\n", size)
+	tempFiles = append(tempFiles, temp)
 }
