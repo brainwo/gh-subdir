@@ -1,1 +1,3 @@
-WIP: Download subdirectory of a GitHub repository as a zip file
+Related project:
+- https://github.com/yuler/gh-download
+- https://download-directory.github.io/
